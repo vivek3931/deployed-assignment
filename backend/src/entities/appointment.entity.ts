@@ -23,7 +23,7 @@ export class Appointment {
   appointment_time: string;
 
   @Column({ type: 'int' })
-  duration: number; // in minutes
+  duration: number; // displayed in minutes
 
   @Column({ type: 'enum', enum: ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'] })
   status: string;
