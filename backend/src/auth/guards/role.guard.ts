@@ -1,19 +1,29 @@
 // src/auth/guards/role.guard.ts
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+
+// Custom roles decorator
+import { SetMetadata } from '@nestjs/common';
+export const Roles = (...roles: Array<'doctor' | 'patient'>) =>
+  SetMetadata('roles', roles);
 
 @Injectable()
 export class RoleGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const requiredRoles = this.reflector.getAllAndOverride<string[]>('roles', [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    // Read roles from decorator metadata
+    const requiredRoles = this.reflector.getAllAndOverride<
+      Array<'doctor' | 'patient'>
+    >('roles', [context.getHandler(), context.getClass()]);
 
     if (!requiredRoles) {
-      return true;
+      return true; // no role restriction → allow
     }
 
     const request = context.switchToHttp().getRequest();
@@ -24,18 +34,15 @@ export class RoleGuard implements CanActivate {
     }
 
     const hasRole = requiredRoles.includes(user.role);
-    
+
     if (!hasRole) {
       throw new ForbiddenException(
-        `Access denied. Required roles: ${requiredRoles.join(', ')}. Your role: ${user.role}`
+        `Access denied. Required roles: ${requiredRoles.join(
+          ', ',
+        )}. Your role: ${user.role}`,
       );
     }
 
     return true;
   }
 }
-
-// Decorator for easy role checking
-import { SetMetadata } from '@nestjs/common';
-
-export const Roles = (...roles: string[]) => SetMetadata('roles', roles);

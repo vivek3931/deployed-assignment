@@ -1,39 +1,49 @@
-// src/auth/strategies/google.strategy.ts
-import { Injectable } from '@nestjs/common';
+// src/auth/strategies/google.strategy.ts (Session-based approach)
 import { PassportStrategy } from '@nestjs/passport';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { Strategy, VerifyCallback } from 'passport-google-oauth20';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
-  constructor(private configService: ConfigService) {
+  constructor() {
     super({
-      clientID: configService.get<string>('GOOGLE_CLIENT_ID'),
-      clientSecret: configService.get<string>('GOOGLE_CLIENT_SECRET'),
-      callbackURL: '/api/v1/auth/google/callback',
-      scope: ['email', 'profile'],
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: 'http://localhost:3000/api/v1/auth/google/callback',
+      scope: ['profile', 'email'],
       passReqToCallback: true,
     });
   }
 
   async validate(
-    request: any,
+    req: any,
     accessToken: string,
     refreshToken: string,
     profile: any,
     done: VerifyCallback,
   ): Promise<any> {
-    const { name, emails, photos } = profile;
-    const role = request.query.state; // Get role from state parameter
+    // Get role from session
+    const role = req.session?.role;
     
+    console.log('Debug - Session:', req.session);
+    console.log('Debug - Role from session:', role);
+
+    if (!role || (role !== 'doctor' && role !== 'patient')) {
+      throw new UnauthorizedException('Invalid or missing role in session');
+    }
+
+    // Clear the role from session after use
+    delete req.session.role;
+
     const user = {
-      email: emails[0].value,
-      name: `${name.givenName} ${name.familyName}`,
-      picture: photos[0].value,
-      role: role, // 'doctor' or 'patient'
+      email: profile.emails[0].value,
+      name: profile.displayName,
+      role: role,
+      googleId: profile.id,
       accessToken,
+      refreshToken,
     };
-    
-    done(null, user);
+
+    return done(null, user);
   }
 }
