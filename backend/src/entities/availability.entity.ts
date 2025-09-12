@@ -1,3 +1,4 @@
+// src/entities/availability.entity.ts
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { Doctor } from './doctor.entity';
 

@@ -1,3 +1,4 @@
+// src/entities/appointment.entity.ts
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { Patient } from './patient.entity';
 import { Doctor } from './doctor.entity';
@@ -22,7 +23,7 @@ export class Appointment {
   appointment_time: string;
 
   @Column({ type: 'int' })
-  duration: number; // displayed in minutes
+  duration: number; // in minutes
 
   @Column({ type: 'enum', enum: ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'] })
   status: string;
