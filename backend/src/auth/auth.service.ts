@@ -42,8 +42,6 @@ export class AuthService {
       // Create role-specific profile
       if (role === 'doctor') {
         const doctor = this.doctorRepository.create({
-          userId: user.id,
-          license_number: '', // Will be filled later
           specialization: '', // Will be filled later
           user: user,
         });
