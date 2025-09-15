@@ -6,6 +6,9 @@
     "esModuleInterop": true,
     "isolatedModules": true,
     "declaration": true,
+    "types": ["node", "express", "express-session"],
+    "include": ["src"],
+
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,

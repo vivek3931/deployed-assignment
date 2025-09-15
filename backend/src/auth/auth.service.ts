@@ -21,7 +21,7 @@ export class AuthService {
 
   async googleLogin(googleUser: any) {
     const { email, name, role } = googleUser;
-    
+
     // Check if user already exists
     let user = await this.userRepository.findOne({ 
       where: { email },

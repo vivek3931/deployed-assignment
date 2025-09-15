@@ -1,74 +1,55 @@
-// src/auth/auth.controller.ts
-import { Controller, Get, Query, Req, Res, UseGuards } from '@nestjs/common';
+// src/auth/auth.controller.ts (Session-based approach)
+import { Controller, Get, Query, Req, Res, UseGuards, Session } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { AuthGuard } from '@nestjs/passport';
-import { Response } from 'express';
 import { AuthService } from './auth.service';
 
 @Controller('api/v1/auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  // Step 1: Store role in session and initiate Google auth
   @Get('google')
-  @UseGuards(AuthGuard('google'))
-  async googleAuth(
-    @Query('role') role: string,
-    @Req() req: any,
+  async initiateGoogleAuth(
+    @Req() req: Request,
     @Res() res: Response,
+    @Query('role') role: 'doctor' | 'patient',
+    @Session() session: Record<string, any>,
   ) {
-    // Validate role parameter
     if (!role || !['doctor', 'patient'].includes(role)) {
-      return res.status(400).json({ 
-        error: 'Invalid or missing role parameter. Use ?role=doctor or ?role=patient' 
-      });
+      return res.status(400).send('Invalid role');
     }
 
-    // Store role in session/state for callback
-    req.session = req.session || {};
-    req.session.role = role;
+    // Store role in session
+    session.role = role;
     
-    // The guard will redirect to Google OAuth
+    // Redirect to Google OAuth
+    return res.redirect('/api/v1/auth/google/redirect');
   }
 
+  // Step 2: Trigger Google OAuth
+  @Get('google/redirect')
+  @UseGuards(AuthGuard('google'))
+  async googleAuthRedirect() {
+    return { message: 'Redirecting to Google OAuth...' };
+  }
+
+  // Step 3: Callback after Google login
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
-  async googleAuthRedirect(@Req() req: any, @Res() res: Response) {
+  async googleAuthCallback(@Req() req, @Res() res: Response) {
     try {
-      // Get role from session or query
-      const role = req.session?.role || req.query.state;
-      
-      if (!role) {
-        return res.status(400).json({ 
-          error: 'Role information missing' 
-        });
-      }
-
-      // Add role to user object
-      req.user.role = role;
-      
-      // Process login
       const result = await this.authService.googleLogin(req.user);
-      
-      // Return JWT token and user info
-      return res.json({
-        message: 'Authentication successful',
-        ...result,
-      });
-      
+      return res.json(result);
     } catch (error) {
-      console.error('OAuth callback error:', error);
-      return res.status(500).json({ 
-        error: 'Authentication failed',
-        details: error.message 
-      });
+      console.error('Google auth callback error:', error);
+      return res.status(500).json({ error: 'Authentication failed' });
     }
   }
 
   @Get('profile')
   @UseGuards(AuthGuard('jwt'))
-  getProfile(@Req() req: any) {
-    return {
-      message: 'Profile retrieved successfully',
-      user: req.user,
-    };
+  getProfile(@Req() req) {
+    return req.user;
   }
 }
