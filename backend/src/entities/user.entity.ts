@@ -1,4 +1,4 @@
-// src/entities/user.entity.ts
+// src/entities/user.entity.ts (Fixed - removed provider)
 import { 
   Entity, 
   PrimaryGeneratedColumn, 
@@ -23,12 +23,6 @@ export class User {
 
   @Column({ type: 'enum', enum: ['doctor', 'patient'] })
   role: string;
-
-  @Column({ nullable: true })
-  provider: string;   // 👈 e.g. 'google', 'facebook'
-
-  @Column({ nullable: true })
-  providerId: string; // 👈 OAuth provider's unique ID for the user
 
   @OneToOne(() => Doctor, doctor => doctor.user)
   doctor: Doctor;
