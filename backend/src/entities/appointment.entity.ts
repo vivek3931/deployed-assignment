@@ -11,9 +11,6 @@ import {
 } from 'typeorm';
 import { Patient } from './patient.entity';
 import { Doctor } from './doctor.entity';
-import { DoctorAvailabilitySlot } from './doctor-availability.entity';
-import { AppointmentSubSlot } from './appointment-sub-slot.entity';
-import { v4 as uuidv4 } from 'uuid';
 
 @Entity('appointments')
 export class Appointment {
