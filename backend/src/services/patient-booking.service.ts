@@ -1,3 +1,4 @@
+// src/services/patient-booking.service.ts
 import { Injectable, BadRequestException, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThanOrEqual, QueryRunner } from 'typeorm';
@@ -7,7 +8,7 @@ import { DoctorAvailabilitySlot } from '../entities/doctor-availability.entity';
 import { AppointmentSubSlot } from '../entities/appointment-sub-slot.entity';
 import { Appointment } from '../entities/appointment.entity';
 import { User } from '../entities/user.entity';
-import { BookAppointmentDto } from '../patient/dto/appointment.dto';
+import { BookAppointmentDto } from '../patient/dto/appointment.dto' // Import from shared DTO
 
 interface DoctorFilters {
     specialization?: string;
@@ -34,9 +35,6 @@ export class PatientBookingService {
         @InjectRepository(User)
         private userRepository: Repository<User>,
     ) {}
-     
-
-    // In your PatientBookingService, add this at the start of bookAppointment:
 
     // ==============================
     // DOCTOR DISCOVERY & LISTING
@@ -207,301 +205,208 @@ export class PatientBookingService {
     // APPOINTMENT BOOKING (MAIN FUNCTIONALITY)
     // ==============================
     async bookAppointment(patientId: string, bookingDto: BookAppointmentDto) {
-    console.log('=== DEBUG START ===');
-    console.log('Patient ID:', patientId);
-    console.log('Booking DTO:', bookingDto);
-
-    // Validate patient exists
-    const patient = await this.patientRepository.findOne({
-        where: { userId: patientId },
-        relations: ['user'],
-    });
-
-    console.log('Patient found:', !!patient);
-    console.log('Patient user found:', !!patient?.user);
-    console.log('Patient user name:', patient?.user?.name);
-
-    if (!patient) {
-        throw new NotFoundException('Patient not found');
-    }
-
-    // Validate availability slot exists and is active
-    const availabilitySlot = await this.availabilitySlotRepository.findOne({
-        where: { id: bookingDto.availabilitySlotId },
-        relations: ['doctor', 'doctor.user', 'subSlots'],
-    });
-
-    console.log('Availability slot found:', !!availabilitySlot);
-    console.log('Availability slot doctor found:', !!availabilitySlot?.doctor);
-    console.log('Availability slot doctor user found:', !!availabilitySlot?.doctor?.user);
-    console.log('Doctor user name:', availabilitySlot?.doctor?.user?.name);
-
-    if (!availabilitySlot) {
-        console.error('CRITICAL: Availability slot not found with ID:', bookingDto.availabilitySlotId);
-        throw new NotFoundException('Availability slot not found');
-    }
-
-    if (!availabilitySlot.doctor) {
-        console.error('CRITICAL: Doctor relation missing on availability slot');
-        throw new NotFoundException('Doctor not found for this availability slot');
-    }
-
-    if (!availabilitySlot.doctor.user) {
-        console.error('CRITICAL: User relation missing on doctor');
-        throw new NotFoundException('Doctor user information not found');
-    }
-
-    if (!availabilitySlot.is_active) {
-        throw new NotFoundException('Availability slot is inactive');
-    }
-
-    // Validate booking time window (same-day cutoff etc.)
-    await this.validateBookingTimeWindow(availabilitySlot);
-
-    // Quick capacity check before attempting transaction
-    if ((availabilitySlot.current_bookings || 0) >= (availabilitySlot.total_capacity || 0)) {
-        throw new ConflictException('This availability is fully booked. Choose another slot.');
-    }
-
-    const slotDuration = availabilitySlot.sub_slot_duration || 30;
-    let queuePosition: number | null = null;
-
-    console.log('=== STARTING TRANSACTION ===');
-    // Create transaction for atomic booking
-    const queryRunner: QueryRunner = this.appointmentRepository.manager.connection.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-        console.log('=== INSIDE TRANSACTION ===');
-
-        let selectedSubSlot: AppointmentSubSlot | null = null;
-        let assignedTime: string;
-        let assignedEndTime: string;
-
-        // CRITICAL FIX: Re-load availability with ALL required relations including doctor.user
-        const availRepo = queryRunner.manager.getRepository(DoctorAvailabilitySlot);
-        const lockedAvailability = await availRepo.findOne({
-            where: { id: availabilitySlot.id },
-            relations: ['subSlots', 'doctor', 'doctor.user'], // FIXED: Added doctor.user relation
+        // Validate patient exists
+        const patient = await this.patientRepository.findOne({
+            where: { userId: patientId },
+            relations: ['user'],
         });
 
-        console.log('=== LOCKED AVAILABILITY LOADED ===');
-        console.log('Locked availability found:', !!lockedAvailability);
-        console.log('Locked availability doctor found:', !!lockedAvailability?.doctor);
-        console.log('Locked availability doctor user found:', !!lockedAvailability?.doctor?.user);
-        console.log('Locked doctor user name:', lockedAvailability?.doctor?.user?.name);
-
-        if (!lockedAvailability) {
-            throw new NotFoundException('Availability slot not found during booking.');
+        if (!patient) {
+            throw new NotFoundException('Patient not found');
         }
 
-        if (!lockedAvailability.doctor) {
-            throw new NotFoundException('Doctor not found during booking.');
+        // Validate availability slot exists and is active
+        const availabilitySlot = await this.availabilitySlotRepository.findOne({
+            where: { id: bookingDto.availabilitySlotId },
+            relations: ['doctor', 'doctor.user', 'subSlots'],
+        });
+
+        if (!availabilitySlot || !availabilitySlot.is_active) {
+            throw new NotFoundException('Availability slot not found or inactive');
         }
 
-        if (!lockedAvailability.doctor.user) {
-            throw new NotFoundException('Doctor user information not found during booking.');
-        }
+        // Validate booking time window (same-day cutoff etc.)
+        await this.validateBookingTimeWindow(availabilitySlot);
 
-        // Re-check capacity under transaction lock
-        if ((lockedAvailability.current_bookings || 0) >= (lockedAvailability.total_capacity || 0)) {
+        // Quick capacity check before attempting transaction
+        if ((availabilitySlot.current_bookings || 0) >= (availabilitySlot.total_capacity || 0)) {
             throw new ConflictException('This availability is fully booked. Choose another slot.');
         }
 
-        console.log('=== PROCESSING SCHEDULE TYPE ===');
-        console.log('Schedule type:', lockedAvailability.schedule_type);
+        const slotDuration = availabilitySlot.sub_slot_duration || 30;
+        let queuePosition: number | null = null;
 
-        if (lockedAvailability.schedule_type === 'wave') {
-            console.log('=== WAVE SCHEDULING ===');
-            // WAVE SCHEDULING: Pick specific sub-slot
-            const subSlotRepo = queryRunner.manager.getRepository(AppointmentSubSlot);
+        // Create transaction for atomic booking
+        const queryRunner: QueryRunner = this.appointmentRepository.manager.connection.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
 
-            if (bookingDto.preferred_time) {
-                console.log('Looking for preferred time:', bookingDto.preferred_time);
-                // Try preferred time first
-                const preferredSubSlot = await subSlotRepo.createQueryBuilder('s')
-                    .setLock('pessimistic_write')
-                    .where('s.availabilitySlot = :availId', { availId: lockedAvailability.id })
-                    .andWhere('s.start_time = :start', { start: bookingDto.preferred_time })
-                    .getOne();
-
-                if (!preferredSubSlot) {
-                    throw new BadRequestException(`Preferred sub-slot ${bookingDto.preferred_time} not found.`);
-                }
-
-                if ((preferredSubSlot.current_bookings || 0) >= (preferredSubSlot.max_capacity || 1)) {
-                    throw new ConflictException(`Preferred time ${bookingDto.preferred_time} is already fully booked.`);
-                }
-
-                selectedSubSlot = preferredSubSlot;
-                console.log('Selected preferred sub-slot:', selectedSubSlot.id);
-            } else {
-                console.log('Finding first available sub-slot');
-                // Find first available sub-slot
-                const availableSubSlot = await subSlotRepo.createQueryBuilder('s')
-                    .setLock('pessimistic_write')
-                    .where('s.availabilitySlot = :availId', { availId: lockedAvailability.id })
-                    .andWhere('COALESCE(s.current_bookings, 0) < COALESCE(s.max_capacity, 1)')
-                    .orderBy('s.start_time', 'ASC')
-                    .getOne();
-
-                if (!availableSubSlot) {
-                    throw new ConflictException('No available sub-slots found for wave scheduling.');
-                }
-
-                selectedSubSlot = availableSubSlot;
-                console.log('Selected available sub-slot:', selectedSubSlot.id);
-            }
-
-            // Assign time from selected sub-slot
-            assignedTime = selectedSubSlot.start_time;
-            assignedEndTime = selectedSubSlot.end_time;
-
-            console.log('Wave assigned time:', assignedTime, 'to', assignedEndTime);
-
-            // Update sub-slot booking count
-            selectedSubSlot.current_bookings = (selectedSubSlot.current_bookings || 0) + 1;
-            if (selectedSubSlot.current_bookings >= (selectedSubSlot.max_capacity || 1)) {
-                selectedSubSlot.status = 'full';
-            }
-            await subSlotRepo.save(selectedSubSlot);
-            console.log('Sub-slot updated, current bookings:', selectedSubSlot.current_bookings);
-
-        } else {
-            console.log('=== STREAM SCHEDULING ===');
-            // STREAM SCHEDULING: Sequential time assignment
-            const currentBookings = lockedAvailability.current_bookings || 0;
-            queuePosition = currentBookings + 1;
-
-            const startMinutes = this.timeToMinutes(lockedAvailability.start_time);
-            const assignedStartMinutes = startMinutes + (currentBookings * slotDuration);
-            const assignedEndMinutes = assignedStartMinutes + slotDuration;
-            const slotEndMinutes = this.timeToMinutes(lockedAvailability.end_time);
-
-            console.log('Stream calculation:');
-            console.log('- Current bookings:', currentBookings);
-            console.log('- Queue position:', queuePosition);
-            console.log('- Start minutes:', startMinutes);
-            console.log('- Assigned start minutes:', assignedStartMinutes);
-            console.log('- Assigned end minutes:', assignedEndMinutes);
-            console.log('- Slot end minutes:', slotEndMinutes);
-
-            if (assignedEndMinutes > slotEndMinutes) {
-                throw new ConflictException('No more time slots available in this session.');
-            }
-
-            assignedTime = this.minutesToTime(assignedStartMinutes);
-            assignedEndTime = this.minutesToTime(assignedEndMinutes);
-
-            console.log('Stream assigned time:', assignedTime, 'to', assignedEndTime);
-
-            // Validate preferred time if provided
-            if (bookingDto.preferred_time && bookingDto.preferred_time !== assignedTime) {
-                throw new ConflictException(`Preferred time ${bookingDto.preferred_time} is not available. Assigned time is ${assignedTime}`);
-            }
-        }
-
-        console.log('=== CREATING APPOINTMENT ===');
-        console.log('Patient:', !!patient);
-        console.log('Doctor:', !!lockedAvailability.doctor);
-        console.log('Doctor User:', !!lockedAvailability.doctor.user);
-
-        // Create appointment record
-        const appointmentRepo = queryRunner.manager.getRepository(Appointment);
-        const newAppointment = appointmentRepo.create({
-            patient,
-            doctor: lockedAvailability.doctor,
-            availabilitySlot: lockedAvailability,
-            subSlot: selectedSubSlot || null,
-            appointment_date: lockedAvailability.date,
-            appointment_time: assignedTime,
-            appointment_end_time: assignedEndTime,
-            duration: slotDuration,
-            status: 'scheduled',
-            consultation_type: bookingDto.consultation_type || lockedAvailability.consultation_type,
-            booking_type: lockedAvailability.schedule_type,
-            queue_position: queuePosition,
-            estimated_time: assignedTime,
-            appointment_reason: bookingDto.appointment_reason || null,
-            symptoms: bookingDto.symptoms || null,
-            consultation_fee: lockedAvailability.doctor.consultation_fee || null,
-        } as Partial<Appointment>);
-
-        console.log('Appointment created, saving...');
-        const savedAppointment = await appointmentRepo.save(newAppointment);
-        console.log('Appointment saved with ID:', savedAppointment.id);
-        console.log('Appointment booking reference:', savedAppointment.booking_reference);
-
-        // Update availability booking count
-        lockedAvailability.current_bookings = (lockedAvailability.current_bookings || 0) + 1;
-        await availRepo.save(lockedAvailability);
-        console.log('Availability updated, current bookings:', lockedAvailability.current_bookings);
-
-        console.log('=== COMMITTING TRANSACTION ===');
-        // Commit transaction
-        await queryRunner.commitTransaction();
-        console.log('Transaction committed successfully');
-
-        console.log('=== CREATING RESPONSE ===');
-        console.log('Doctor name for response:', lockedAvailability.doctor.user.name);
-
-        // Return success response
-        const response = {
-            success: true,
-            message: 'Appointment booked successfully',
-            appointment: {
-                id: savedAppointment.id,
-                booking_reference: savedAppointment.booking_reference,
-                doctor_name: lockedAvailability.doctor.user.name, // This should now work
-                doctor_specialization: lockedAvailability.doctor.specialization,
-                appointment_date: savedAppointment.appointment_date,
-                appointment_time: savedAppointment.appointment_time,
-                appointment_end_time: savedAppointment.appointment_end_time,
-                estimated_time: savedAppointment.estimated_time,
-                duration: savedAppointment.duration,
-                consultation_type: savedAppointment.consultation_type,
-                consultation_fee: savedAppointment.consultation_fee,
-                status: savedAppointment.status,
-                booking_type: savedAppointment.booking_type,
-                queue_position: savedAppointment.queue_position,
-                clinic_address: lockedAvailability.doctor.clinic_address,
-            },
-        };
-
-        console.log('=== RESPONSE CREATED SUCCESSFULLY ===');
-        return response;
-
-    } catch (error) {
-        console.error('=== TRANSACTION ERROR ===');
-        console.error('Error type:', error.constructor.name);
-        console.error('Error message:', error.message);
-        console.error('Full error:', error);
-
-        // Rollback transaction on error
         try {
-            await queryRunner.rollbackTransaction();
-            console.log('Transaction rolled back successfully');
-        } catch (rollbackError) {
-            console.error('Rollback failed:', rollbackError.message);
-        }
+            let selectedSubSlot: AppointmentSubSlot | null = null;
+            let assignedTime: string;
+            let assignedEndTime: string;
 
-        // Re-throw known exceptions
-        if (error instanceof BadRequestException || 
-            error instanceof ConflictException || 
-            error instanceof NotFoundException) {
-            throw error;
-        }
+            // Re-load availability with write lock including ALL relations
+            const availRepo = queryRunner.manager.getRepository(DoctorAvailabilitySlot);
+            const lockedAvailability = await availRepo.findOne({
+                where: { id: availabilitySlot.id },
+                relations: ['subSlots', 'doctor', 'doctor.user'], // CRITICAL: Include doctor.user
+            });
 
-        // Wrap unknown errors
-        console.error('Throwing internal server error');
-        throw new InternalServerErrorException(error.message || 'Failed to book appointment');
-    } finally {
-        console.log('=== RELEASING QUERY RUNNER ===');
-        await queryRunner.release();
-        console.log('Query runner released');
+            if (!lockedAvailability) {
+                throw new NotFoundException('Availability slot not found during booking.');
+            }
+
+            // Re-check capacity under transaction lock
+            if ((lockedAvailability.current_bookings || 0) >= (lockedAvailability.total_capacity || 0)) {
+                throw new ConflictException('This availability is fully booked. Choose another slot.');
+            }
+
+            if (lockedAvailability.schedule_type === 'wave') {
+                // WAVE SCHEDULING: Pick specific sub-slot
+                const subSlotRepo = queryRunner.manager.getRepository(AppointmentSubSlot);
+
+                if (bookingDto.preferred_time) {
+                    // Try preferred time first
+                    const preferredSubSlot = await subSlotRepo.createQueryBuilder('s')
+                        .setLock('pessimistic_write')
+                        .where('s.availabilitySlot = :availId', { availId: lockedAvailability.id })
+                        .andWhere('s.start_time = :start', { start: bookingDto.preferred_time })
+                        .getOne();
+
+                    if (!preferredSubSlot) {
+                        throw new BadRequestException(`Preferred sub-slot ${bookingDto.preferred_time} not found.`);
+                    }
+
+                    if ((preferredSubSlot.current_bookings || 0) >= (preferredSubSlot.max_capacity || 1)) {
+                        throw new ConflictException(`Preferred time ${bookingDto.preferred_time} is already fully booked.`);
+                    }
+
+                    selectedSubSlot = preferredSubSlot;
+                } else {
+                    // Find first available sub-slot
+                    const availableSubSlot = await subSlotRepo.createQueryBuilder('s')
+                        .setLock('pessimistic_write')
+                        .where('s.availabilitySlot = :availId', { availId: lockedAvailability.id })
+                        .andWhere('COALESCE(s.current_bookings, 0) < COALESCE(s.max_capacity, 1)')
+                        .orderBy('s.start_time', 'ASC')
+                        .getOne();
+
+                    if (!availableSubSlot) {
+                        throw new ConflictException('No available sub-slots found for wave scheduling.');
+                    }
+
+                    selectedSubSlot = availableSubSlot;
+                }
+
+                // Assign time from selected sub-slot
+                assignedTime = selectedSubSlot.start_time;
+                assignedEndTime = selectedSubSlot.end_time;
+
+                // Update sub-slot booking count
+                selectedSubSlot.current_bookings = (selectedSubSlot.current_bookings || 0) + 1;
+                if (selectedSubSlot.current_bookings >= (selectedSubSlot.max_capacity || 1)) {
+                    selectedSubSlot.status = 'full';
+                }
+                await subSlotRepo.save(selectedSubSlot);
+
+            } else {
+                // STREAM SCHEDULING: Sequential time assignment
+                const currentBookings = lockedAvailability.current_bookings || 0;
+                queuePosition = currentBookings + 1;
+
+                const startMinutes = this.timeToMinutes(lockedAvailability.start_time);
+                const assignedStartMinutes = startMinutes + (currentBookings * slotDuration);
+                const assignedEndMinutes = assignedStartMinutes + slotDuration;
+                const slotEndMinutes = this.timeToMinutes(lockedAvailability.end_time);
+
+                if (assignedEndMinutes > slotEndMinutes) {
+                    throw new ConflictException('No more time slots available in this session.');
+                }
+
+                assignedTime = this.minutesToTime(assignedStartMinutes);
+                assignedEndTime = this.minutesToTime(assignedEndMinutes);
+
+                // Validate preferred time if provided
+                if (bookingDto.preferred_time && bookingDto.preferred_time !== assignedTime) {
+                    throw new ConflictException(`Preferred time ${bookingDto.preferred_time} is not available. Assigned time is ${assignedTime}`);
+                }
+            }
+
+            // Create appointment record
+            const appointmentRepo = queryRunner.manager.getRepository(Appointment);
+            const newAppointment = appointmentRepo.create({
+                patient,
+                doctor: lockedAvailability.doctor,
+                availabilitySlot: lockedAvailability,
+                subSlot: selectedSubSlot || null,
+                appointment_date: lockedAvailability.date,
+                appointment_time: assignedTime,
+                appointment_end_time: assignedEndTime,
+                duration: slotDuration,
+                status: 'scheduled',
+                consultation_type: bookingDto.consultation_type || lockedAvailability.consultation_type,
+                booking_type: lockedAvailability.schedule_type,
+                queue_position: queuePosition,
+                estimated_time: assignedTime,
+                appointment_reason: bookingDto.appointment_reason || null,
+                symptoms: bookingDto.symptoms || null,
+                consultation_fee: lockedAvailability.doctor.consultation_fee || null,
+            } as Partial<Appointment>);
+
+            const savedAppointment = await appointmentRepo.save(newAppointment);
+
+            // Update availability booking count
+            lockedAvailability.current_bookings = (lockedAvailability.current_bookings || 0) + 1;
+            await availRepo.save(lockedAvailability);
+
+            // Commit transaction
+            await queryRunner.commitTransaction();
+
+            // Return success response
+            return {
+                success: true,
+                message: 'Appointment booked successfully',
+                appointment: {
+                    id: savedAppointment.id,
+                    booking_reference: savedAppointment.booking_reference,
+                    doctor_name: lockedAvailability.doctor.user.name,
+                    doctor_specialization: lockedAvailability.doctor.specialization,
+                    appointment_date: savedAppointment.appointment_date,
+                    appointment_time: savedAppointment.appointment_time,
+                    appointment_end_time: savedAppointment.appointment_end_time,
+                    estimated_time: savedAppointment.estimated_time,
+                    duration: savedAppointment.duration,
+                    consultation_type: savedAppointment.consultation_type,
+                    consultation_fee: savedAppointment.consultation_fee,
+                    status: savedAppointment.status,
+                    booking_type: savedAppointment.booking_type,
+                    queue_position: savedAppointment.queue_position,
+                    clinic_address: lockedAvailability.doctor.clinic_address,
+                },
+            };
+
+        } catch (error) {
+            // Rollback transaction on error
+            try {
+                await queryRunner.rollbackTransaction();
+            } catch (rollbackError) {
+                // Ignore rollback errors
+            }
+
+            // Re-throw known exceptions
+            if (error instanceof BadRequestException || 
+                error instanceof ConflictException || 
+                error instanceof NotFoundException) {
+                throw error;
+            }
+
+            // Wrap unknown errors
+            throw new InternalServerErrorException(error.message || 'Failed to book appointment');
+        } finally {
+            await queryRunner.release();
+        }
     }
-}
 
     // ==============================
     // PATIENT APPOINTMENT MANAGEMENT
@@ -730,4 +635,4 @@ export class PatientBookingService {
         const mins = minutes % 60;
         return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:00`;
     }
-}
+}   

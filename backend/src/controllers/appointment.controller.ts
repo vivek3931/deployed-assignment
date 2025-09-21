@@ -1,3 +1,4 @@
+// src/controllers/appointments.controller.ts
 import { 
   Controller, 
   Get, 
@@ -24,12 +25,11 @@ import {
   CancelAppointmentDto 
 } from '../patient/dto/appointment.dto'
 
-// REMOVE the local DTO classes - they're now imported
-
 @Controller('api/v1/appointments')
 export class AppointmentsController {
   constructor(private patientBookingService: PatientBookingService) {}
 
+  // ===== APPOINTMENT BOOKING =====
   @Post()
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.CREATED)
@@ -44,18 +44,97 @@ export class AppointmentsController {
     return this.patientBookingService.bookAppointment(req.user.id, bookingDto);
   }
 
+  // ===== APPOINTMENT VIEWING =====
   @Get('my-appointments')
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
   async getMyAppointments(
     @Req() req: any,
     @Query('status') status?: string,
+    @Query('upcoming_only') upcomingOnly?: string,
   ) {
     if (req.user.role !== 'patient') {
       throw new BadRequestException('Access denied. Patients only.');
     }
 
-    return this.patientBookingService.getPatientAppointments(req.user.id, status);
+    let filterStatus = status;
+    if (upcomingOnly === 'true') {
+      filterStatus = 'scheduled';
+    }
+
+    const result = await this.patientBookingService.getPatientAppointments(req.user.id, filterStatus);
+    
+    if (upcomingOnly === 'true') {
+      const now = new Date();
+      result.appointments = result.appointments.filter(apt => {
+        const aptDate = new Date(apt.appointment_date);
+        return aptDate >= now;
+      });
+    }
+
+    return result;
+  }
+
+  @Get('upcoming')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async getUpcomingAppointments(
+    @Req() req: any,
+    @Query('days', new ParseIntPipe({ optional: true })) days = 7,
+  ) {
+    if (req.user.role !== 'patient') {
+      throw new BadRequestException('Access denied. Patients only.');
+    }
+
+    const appointments = await this.patientBookingService.getPatientAppointments(req.user.id);
+    const now = new Date();
+    const futureDate = new Date();
+    futureDate.setDate(now.getDate() + days);
+
+    const upcoming = appointments.appointments.filter(apt => {
+      const aptDate = new Date(apt.appointment_date);
+      return aptDate >= now && aptDate <= futureDate && 
+             (apt.status === 'scheduled' || apt.status === 'confirmed');
+    });
+
+    return {
+      success: true,
+      appointments: upcoming,
+    };
+  }
+
+  @Get('history')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async getAppointmentHistory(
+    @Req() req: any,
+    @Query('page', new ParseIntPipe({ optional: true })) page = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit = 10,
+    @Query('status') status?: string,
+  ) {
+    if (req.user.role !== 'patient') {
+      throw new BadRequestException('Access denied. Patients only.');
+    }
+
+    const allAppointments = await this.patientBookingService.getPatientAppointments(req.user.id, status);
+    
+    // Simple pagination
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const paginatedAppointments = allAppointments.appointments.slice(startIndex, endIndex);
+
+    return {
+      success: true,
+      data: {
+        appointments: paginatedAppointments,
+        pagination: {
+          current_page: page,
+          per_page: limit,
+          total_items: allAppointments.appointments.length,
+          total_pages: Math.ceil(allAppointments.appointments.length / limit),
+        },
+      },
+    };
   }
 
   @Get(':id')
@@ -68,6 +147,7 @@ export class AppointmentsController {
     return this.patientBookingService.getAppointmentDetails(appointmentId, req.user.id);
   }
 
+  // ===== APPOINTMENT MANAGEMENT =====
   @Put(':id')
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
@@ -80,6 +160,7 @@ export class AppointmentsController {
       throw new BadRequestException('Access denied. Patients only.');
     }
 
+    // TODO: Implement update logic in service
     return {
       success: true,
       message: 'Appointment updated successfully',
@@ -116,6 +197,7 @@ export class AppointmentsController {
       throw new BadRequestException('Access denied. Patients only.');
     }
 
+    // TODO: Implement confirmation logic in service
     return {
       success: true,
       message: 'Appointment confirmed successfully',
@@ -138,82 +220,53 @@ export class AppointmentsController {
       throw new BadRequestException('Access denied. Patients only.');
     }
 
+    // TODO: Implement reschedule logic in service
     return {
       success: true,
       message: 'Appointment rescheduled successfully',
     };
   }
 
-  @Get('history')
+  // ===== FEEDBACK =====
+  @Post(':id/feedback')
   @UseGuards(AuthGuard('jwt'))
-  @HttpCode(HttpStatus.OK)
-  async getAppointmentHistory(
+  @HttpCode(HttpStatus.CREATED)
+  async submitFeedback(
     @Req() req: any,
-    @Query('page', new ParseIntPipe({ optional: true })) page = 1,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit = 10,
+    @Param('id', ParseUUIDPipe) appointmentId: string,
+    @Body() feedbackData: {
+      rating: number;
+      comment?: string;
+      would_recommend: boolean;
+    },
   ) {
     if (req.user.role !== 'patient') {
       throw new BadRequestException('Access denied. Patients only.');
     }
 
+    // TODO: Implement feedback system in service
     return {
       success: true,
-      data: {
-        appointments: [],
-        pagination: {
-          current_page: page,
-          per_page: limit,
-          total_items: 0,
-          total_pages: 0,
-        },
+      message: 'Feedback submitted successfully',
+      feedback: {
+        appointment_id: appointmentId,
+        rating: feedbackData.rating,
+        comment: feedbackData.comment,
+        would_recommend: feedbackData.would_recommend,
       },
     };
   }
 
-  @Get('upcoming')
-  @UseGuards(AuthGuard('jwt'))
-  @HttpCode(HttpStatus.OK)
-  async getUpcomingAppointments(@Req() req: any) {
-    if (req.user.role !== 'patient') {
-      throw new BadRequestException('Access denied. Patients only.');
-    }
-
-    return this.patientBookingService.getPatientAppointments(req.user.id, 'scheduled');
-  }
-
+  // ===== UTILITY ENDPOINTS =====
   @Get('reference/:reference')
   @HttpCode(HttpStatus.OK)
   async getAppointmentByReference(@Param('reference') reference: string) {
+    // TODO: Implement reference lookup in service
     return {
       success: true,
-      appointment: {},
-    };
-  }
-
-  @Get('admin/all')
-  @UseGuards(AuthGuard('jwt'))
-  @HttpCode(HttpStatus.OK)
-  async getAllAppointments(
-    @Req() req: any,
-    @Query('page', new ParseIntPipe({ optional: true })) page = 1,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit = 20,
-    @Query('status') status?: string,
-    @Query('date') date?: string,
-  ) {
-    if (req.user.role !== 'admin') {
-      throw new BadRequestException('Access denied. Admin only.');
-    }
-
-    return {
-      success: true,
-      data: {
-        appointments: [],
-        pagination: {
-          current_page: page,
-          per_page: limit,
-          total_items: 0,
-          total_pages: 0,
-        },
+      appointment: {
+        booking_reference: reference,
+        // Basic appointment info without sensitive data
       },
     };
   }
@@ -229,6 +282,36 @@ export class AppointmentsController {
         booking_service: 'operational',
         notification_service: 'operational',
         database: 'operational',
+      },
+    };
+  }
+
+  // ===== ADMIN ENDPOINTS =====
+  @Get('admin/all')
+  @UseGuards(AuthGuard('jwt'))
+  @HttpCode(HttpStatus.OK)
+  async getAllAppointments(
+    @Req() req: any,
+    @Query('page', new ParseIntPipe({ optional: true })) page = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit = 20,
+    @Query('status') status?: string,
+    @Query('date') date?: string,
+  ) {
+    if (req.user.role !== 'admin') {
+      throw new BadRequestException('Access denied. Admin only.');
+    }
+
+    // TODO: Implement admin view in service
+    return {
+      success: true,
+      data: {
+        appointments: [],
+        pagination: {
+          current_page: page,
+          per_page: limit,
+          total_items: 0,
+          total_pages: 0,
+        },
       },
     };
   }

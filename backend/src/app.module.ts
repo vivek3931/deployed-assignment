@@ -15,6 +15,7 @@
     import { Availability } from './entities/availability.entity';
     import { DoctorAvailabilitySlot } from './entities/doctor-availability.entity'; 
     import { AppointmentSubSlot } from './entities/appointment-sub-slot.entity';  
+import { PatientProfile } from './entities/patient-profile.entity';
 
     const dotenv = require('dotenv');
     dotenv.config();
@@ -43,6 +44,7 @@
                 User, 
                 Doctor, 
                 Patient, 
+                PatientProfile,
                 Appointment, 
                 Availability,
                 DoctorAvailabilitySlot, 
