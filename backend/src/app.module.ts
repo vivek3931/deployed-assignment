@@ -50,7 +50,7 @@ import { PatientProfile } from './entities/patient-profile.entity';
                 DoctorAvailabilitySlot, 
                 AppointmentSubSlot 
               ],
-              synchronize: true,
+              synchronize: false,
             };
           },
           inject: [ConfigService],
