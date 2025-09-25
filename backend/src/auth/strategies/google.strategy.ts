@@ -8,7 +8,10 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     super({
       clientID: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3000/api/v1/auth/google/callback',
+callbackURL:
+  process.env.NODE_ENV === 'production'
+    ? 'https://deployed-assignment.onrender.com/api/v1/auth/google/callback'
+    : 'http://localhost:3000/api/v1/auth/google/callback',
       scope: ['email', 'profile'],
       // Remove passReqToCallback if you don't need the request object
     });
